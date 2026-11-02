@@ -1,0 +1,10 @@
+# Visual Studio local state and build output
+.vs/
+*.vcxproj.user
+team_project/bin/
+team_project/obj/
+team_project/.setup/
+
+# Unused tools and static GLEW libraries; keep runtime DLLs and import libraries
+team_project/external/glew/bin/**/*.exe
+team_project/external/glew/lib/**/glew32s.lib
