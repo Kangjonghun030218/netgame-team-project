@@ -1,4 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include "connection_check.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h" // 프로젝트 폴더에 stb_image.h 파일이 있어야 합니다.
 
@@ -1556,6 +1557,9 @@ void Timer(int value) {
 
 int main(int argc, char** argv)
 {
+    static ConnectionCheck connection;
+    connection.connectTo("127.0.0.1", 9000);
+
     glutInit(&argc, argv);
     int screenWidth = glutGet(GLUT_SCREEN_WIDTH);
     int screenHeight = glutGet(GLUT_SCREEN_HEIGHT);

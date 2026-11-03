@@ -25,6 +25,29 @@ OpenGL 의존성은 `team_project/external/`에 포함되어 있습니다. GLEW 
 
 실제 실행 소스는 `team_project/team_project/team_ple.cpp`입니다. 빌드하면 `team_project/bin/x64/Debug/`에 실행 파일, 필요한 DLL, 텍스처와 GLSL 파일을 모읍니다. Visual Studio에서도 이 출력 폴더를 작업 폴더로 사용합니다.
 
+## TCP 서버 초기 실행
+
+솔루션의 `game_server`는 게임과 별도로 실행하는 콘솔 서버입니다. Visual Studio에서
+`game_server`를 시작 프로젝트로 설정하고 **Debug / x64**로 실행하거나,
+빌드 후 `team_project/bin/x64/Debug/game_server.exe`를 직접 실행합니다.
+
+- 소스: `team_project/game_server/server.cpp`
+- 초기화 순서: `WSAStartup(2.2)` → `socket` → `bind` → `listen`
+- 주소: 모든 로컬 IPv4 인터페이스(`INADDR_ANY`), TCP 포트 **9000**
+- 같은 PC의 접속 주소는 `127.0.0.1:9000`, 다른 PC에서는 서버 PC의 LAN IPv4 주소를 사용합니다. 외부 접속에는 방화벽의 해당 포트 허용이 필요합니다.
+- Enter를 누르면 소켓을 닫고 `WSACleanup`으로 종료합니다. 실패 시 오류 코드를 출력하고 자원을 정리합니다.
+
+임시 연결 확인 코드도 포함되어 있습니다. 서버를 먼저 켜고 게임을 실행하면
+클라이언트 콘솔에 `[Client] Connected to 127.0.0.1:9000`, 서버 콘솔에
+`[Server] Client connected`와 현재 연결 수가 표시됩니다. 연결 종료도 서버에 표시됩니다.
+서버가 없으면 오류를 출력하고 오프라인으로 게임을 실행합니다(접속 대기 최대 2초).
+다른 PC의 서버를 사용하려면 `team_ple.cpp`의 `connection.connectTo`에 있는
+`127.0.0.1`을 서버의 LAN IPv4 주소로 바꿉니다. 자동 재접속이나 실시간 연결 상태 UI는 없습니다.
+
+서버는 `select`로 최대 63개 클라이언트의 연결을 관리합니다.
+`SOMAXCONN`은 접속 요청 대기열 설정이며 게임 참가 인원수가 아닙니다.
+게임 데이터 송수신과 위치 동기화는 아직 구현하지 않았습니다.
+
 ## 3인 협업 방법
 
 각자 작업할 때 `main`을 최신 상태로 가져온 뒤 기능별 브랜치를 만듭니다. 변경 내용을 커밋하고 자신의 브랜치를 푸시한 다음, GitHub에서 Pull Request를 열어 팀원이 확인한 후 `main`에 병합합니다.
