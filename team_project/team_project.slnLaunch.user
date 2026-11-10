@@ -3,11 +3,11 @@
     "Name": "새 프로필",
     "Projects": [
       {
-        "Path": "team_project\\team_project.vcxproj",
+        "Path": "game_server\\game_server.vcxproj",
         "Action": "Start"
       },
       {
-        "Path": "game_server\\game_server.vcxproj",
+        "Path": "team_project\\team_project.vcxproj",
         "Action": "Start"
       }
     ]
