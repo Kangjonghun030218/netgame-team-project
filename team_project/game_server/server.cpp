@@ -9,7 +9,6 @@
 namespace {
 constexpr unsigned short kServerPort = 9000;
 
-// Destroy the listening socket before cleaning up Winsock on every exit path.
 struct ServerResources {
     bool winsockStarted = false;
     SOCKET listenSocket = INVALID_SOCKET;
@@ -25,6 +24,26 @@ struct ServerResources {
         }
     }
 };
+
+void acceptClient(ServerResources& server) {
+    sockaddr_in peer{};
+    int size = sizeof(peer);
+    SOCKET client = accept(server.listenSocket, reinterpret_cast<sockaddr*>(&peer), &size);
+    if (client == INVALID_SOCKET) {
+        std::cerr << "accept failed: " << WSAGetLastError() << std::endl;
+        return;
+    }
+    if (server.clients.size() >= FD_SETSIZE - 1) {
+        closesocket(client);
+        std::cerr << "[Server] Client limit reached." << std::endl;
+        return;
+    }
+    server.clients.push_back(client);
+    char ip[INET_ADDRSTRLEN]{};
+    inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+    std::cout << "[Server] Client connected: " << ip << ':' << ntohs(peer.sin_port)
+        << " | Connected: " << server.clients.size() << std::endl;
+}
 }
 
 int main() {
@@ -101,23 +120,7 @@ int main() {
             ++i;
         }
         if (FD_ISSET(server.listenSocket, &readable)) {
-            sockaddr_in peer{};
-            int size = sizeof(peer);
-            SOCKET client = accept(server.listenSocket, reinterpret_cast<sockaddr*>(&peer), &size);
-            if (client == INVALID_SOCKET) {
-                std::cerr << "accept failed: " << WSAGetLastError() << std::endl;
-                continue;
-            }
-            if (server.clients.size() >= FD_SETSIZE - 1) {
-                closesocket(client);
-                std::cerr << "[Server] Client limit reached." << std::endl;
-                continue;
-            }
-            server.clients.push_back(client);
-            char ip[INET_ADDRSTRLEN]{};
-            inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
-            std::cout << "[Server] Client connected: " << ip << ':' << ntohs(peer.sin_port)
-                << " | Connected: " << server.clients.size() << std::endl;
+            acceptClient(server);
         }
     }
     return 0;
