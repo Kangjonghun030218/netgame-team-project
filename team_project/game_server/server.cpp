@@ -2,12 +2,14 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <cstddef>
 #include <iostream>
 #include <vector>
 #include <conio.h>
 
 namespace {
 constexpr unsigned short kServerPort = 9000;
+constexpr std::size_t kMaxClients = 1; 
 
 struct ServerResources {
     bool winsockStarted = false;
@@ -33,9 +35,9 @@ void acceptClient(ServerResources& server) {
         std::cerr << "accept failed: " << WSAGetLastError() << std::endl;
         return;
     }
-    if (server.clients.size() >= FD_SETSIZE - 1) {
+    if (server.clients.size() >= kMaxClients) {
         closesocket(client);
-        std::cerr << "[Server] Client limit reached." << std::endl;
+        std::cerr << "[Server] Room full. Only one remote client can join." << std::endl;
         return;
     }
     server.clients.push_back(client);
