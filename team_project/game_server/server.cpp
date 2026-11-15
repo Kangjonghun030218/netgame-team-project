@@ -2,8 +2,10 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <vector>
 #include <conio.h>
@@ -14,11 +16,17 @@ constexpr std::size_t kMaxClients = 1;
 
 constexpr std::uint32_t kHostPlayerId = 1;
 constexpr std::uint32_t kParticipantPlayerId = 2;
+constexpr std::uint16_t kProtocolVersion = 1;
+constexpr std::uint16_t kJoinRequestType = 1;
+constexpr std::size_t kHeaderBytes = 12;
 
 struct ClientSession {
     SOCKET socket;
     std::uint32_t playerId;
     std::uint32_t sessionId;
+    std::array<unsigned char, kHeaderBytes> joinHeader{};
+    std::size_t headerBytesReceived = 0;
+    bool joinValidated = false;
 };
 
 struct ServerResources {
@@ -37,6 +45,47 @@ struct ServerResources {
         }
     }
 };
+
+std::uint16_t readNetworkU16(const unsigned char* bytes) {
+    return static_cast<std::uint16_t>((static_cast<std::uint16_t>(bytes[0]) << 8) | bytes[1]);
+}
+
+std::uint32_t readNetworkU32(const unsigned char* bytes) {
+    return (static_cast<std::uint32_t>(readNetworkU16(bytes)) << 16) | readNetworkU16(bytes + 2);
+}
+
+bool consumeJoinRequest(ClientSession& client, const char* bytes, std::size_t count) {
+    if (client.joinValidated || count > kHeaderBytes - client.headerBytesReceived) {
+        std::cerr << "[Server] Unexpected data before join approval." << std::endl;
+        return false;
+    }
+    std::memcpy(client.joinHeader.data() + client.headerBytesReceived, bytes, count);
+    client.headerBytesReceived += count;
+    if (client.headerBytesReceived < kHeaderBytes) return true;
+
+    // Header: version(u16), type(u16), bodyBytes(u32), sequence(u32), big endian.
+    const unsigned char* header = client.joinHeader.data();
+    if (readNetworkU16(header) != kProtocolVersion) {
+        std::cerr << "[Server] Join rejected: protocol version mismatch." << std::endl;
+        return false;
+    }
+    if (readNetworkU16(header + 2) != kJoinRequestType) {
+        std::cerr << "[Server] Join rejected: SESSION_JOIN_REQUEST must come first." << std::endl;
+        return false;
+    }
+    if (readNetworkU32(header + 4) != 0) {
+        std::cerr << "[Server] Join rejected: request body must be empty." << std::endl;
+        return false;
+    }
+    if (readNetworkU32(header + 8) != 1) {
+        std::cerr << "[Server] Join rejected: first sequence must be 1." << std::endl;
+        return false;
+    }
+    client.joinValidated = true;
+    std::cout << "[Server] Join request validated. Player ID: " << client.playerId
+        << " | Session ID: " << client.sessionId << std::endl;
+    return true;
+}
 
 void acceptClient(ServerResources& server) {
     sockaddr_in peer{};
@@ -128,15 +177,18 @@ int main() {
             return 1;
         }
         for (size_t i = 0; i < server.clients.size();) {
-            const ClientSession client = server.clients[i];
+            ClientSession& client = server.clients[i];
             if (FD_ISSET(client.socket, &readable)) {
                 char buffer[256];
                 const int received = recv(client.socket, buffer, sizeof(buffer), 0);
-                if (received <= 0) {
+                if (received <= 0 ||
+                    !consumeJoinRequest(client, buffer, static_cast<std::size_t>(received))) {
+                    const std::uint32_t playerId = client.playerId;
+                    const std::uint32_t sessionId = client.sessionId;
                     closesocket(client.socket);
                     server.clients.erase(server.clients.begin() + i);
-                    std::cout << "[Server] Client disconnected. Player ID: " << client.playerId
-                        << " | Session ID: " << client.sessionId << " | Connected: "
+                    std::cout << "[Server] Client disconnected. Player ID: " << playerId
+                        << " | Session ID: " << sessionId << " | Connected: "
                         << server.clients.size() << std::endl;
                     continue;
                 }
