@@ -18,7 +18,9 @@ constexpr std::uint32_t kHostPlayerId = 1;
 constexpr std::uint32_t kParticipantPlayerId = 2;
 constexpr std::uint16_t kProtocolVersion = 1;
 constexpr std::uint16_t kJoinRequestType = 1;
+constexpr std::uint16_t kJoinAcceptType = 2;
 constexpr std::size_t kHeaderBytes = 12;
+constexpr std::size_t kJoinApprovalBytes = 20;
 
 struct ClientSession {
     SOCKET socket;
@@ -27,6 +29,7 @@ struct ClientSession {
     std::array<unsigned char, kHeaderBytes> joinHeader{};
     std::size_t headerBytesReceived = 0;
     bool joinValidated = false;
+    std::size_t approvalBytesSent = 0;
 };
 
 struct ServerResources {
@@ -54,9 +57,46 @@ std::uint32_t readNetworkU32(const unsigned char* bytes) {
     return (static_cast<std::uint32_t>(readNetworkU16(bytes)) << 16) | readNetworkU16(bytes + 2);
 }
 
+void writeNetworkU16(unsigned char* bytes, std::uint16_t value) {
+    bytes[0] = static_cast<unsigned char>(value >> 8);
+    bytes[1] = static_cast<unsigned char>(value);
+}
+
+void writeNetworkU32(unsigned char* bytes, std::uint32_t value) {
+    writeNetworkU16(bytes, static_cast<std::uint16_t>(value >> 16));
+    writeNetworkU16(bytes + 2, static_cast<std::uint16_t>(value));
+}
+
+bool sendJoinApproval(ClientSession& client) {
+    if (client.approvalBytesSent == kJoinApprovalBytes) return true;
+    std::array<unsigned char, kJoinApprovalBytes> approval{};
+    writeNetworkU16(approval.data(), kProtocolVersion);
+    writeNetworkU16(approval.data() + 2, kJoinAcceptType);
+    writeNetworkU32(approval.data() + 4, 8);
+    writeNetworkU32(approval.data() + 8, 1);
+    writeNetworkU32(approval.data() + 12, client.playerId);
+    writeNetworkU32(approval.data() + 16, client.sessionId);
+    const int sent = send(client.socket,
+        reinterpret_cast<const char*>(approval.data() + client.approvalBytesSent),
+        static_cast<int>(kJoinApprovalBytes - client.approvalBytesSent), 0);
+    if (sent == SOCKET_ERROR) {
+        const int error = WSAGetLastError();
+        if (error == WSAEWOULDBLOCK) return true;
+        std::cerr << "[Server] Join approval send failed: " << error << std::endl;
+        return false;
+    }
+    if (sent == 0) return false;
+    client.approvalBytesSent += static_cast<std::size_t>(sent);
+    if (client.approvalBytesSent == kJoinApprovalBytes) {
+        std::cout << "[Server] Client approved. Player ID: " << client.playerId
+            << " | Session ID: " << client.sessionId << std::endl;
+    }
+    return true;
+}
+
 bool consumeJoinRequest(ClientSession& client, const char* bytes, std::size_t count) {
     if (client.joinValidated || count > kHeaderBytes - client.headerBytesReceived) {
-        std::cerr << "[Server] Unexpected data before join approval." << std::endl;
+        std::cerr << "[Server] Unexpected additional session data." << std::endl;
         return false;
     }
     std::memcpy(client.joinHeader.data() + client.headerBytesReceived, bytes, count);
@@ -104,6 +144,12 @@ void acceptClient(ServerResources& server) {
     if (server.nextSessionId == 0) {
         closesocket(client);
         std::cerr << "[Server] Session ID limit reached." << std::endl;
+        return;
+    }
+    u_long nonblocking = 1;
+    if (ioctlsocket(client, FIONBIO, &nonblocking) == SOCKET_ERROR) {
+        std::cerr << "[Server] Nonblocking socket failed: " << WSAGetLastError() << std::endl;
+        closesocket(client);
         return;
     }
     const ClientSession newClient{client, kParticipantPlayerId, server.nextSessionId++};
@@ -167,31 +213,44 @@ int main() {
         << "Press Enter to stop the server." << std::endl;
     while (true) {
         if (_kbhit() && _getch() == '\r') break;
-        fd_set readable;
+        fd_set readable, writable;
         FD_ZERO(&readable);
+        FD_ZERO(&writable);
         FD_SET(server.listenSocket, &readable);
-        for (const ClientSession& client : server.clients) FD_SET(client.socket, &readable);
+        for (const ClientSession& client : server.clients) {
+            FD_SET(client.socket, &readable);
+            if (client.joinValidated && client.approvalBytesSent < kJoinApprovalBytes)
+                FD_SET(client.socket, &writable);
+        }
         timeval timeout{0, 100000};
-        if (select(0, &readable, nullptr, nullptr, &timeout) == SOCKET_ERROR) {
+        if (select(0, &readable, &writable, nullptr, &timeout) == SOCKET_ERROR) {
             std::cerr << "select failed: " << WSAGetLastError() << std::endl;
             return 1;
         }
         for (size_t i = 0; i < server.clients.size();) {
             ClientSession& client = server.clients[i];
+            bool keepConnection = true;
             if (FD_ISSET(client.socket, &readable)) {
                 char buffer[256];
                 const int received = recv(client.socket, buffer, sizeof(buffer), 0);
-                if (received <= 0 ||
-                    !consumeJoinRequest(client, buffer, static_cast<std::size_t>(received))) {
-                    const std::uint32_t playerId = client.playerId;
-                    const std::uint32_t sessionId = client.sessionId;
-                    closesocket(client.socket);
-                    server.clients.erase(server.clients.begin() + i);
-                    std::cout << "[Server] Client disconnected. Player ID: " << playerId
-                        << " | Session ID: " << sessionId << " | Connected: "
-                        << server.clients.size() << std::endl;
-                    continue;
-                }
+                if (received > 0)
+                    keepConnection = consumeJoinRequest(client, buffer, static_cast<std::size_t>(received));
+                else if (received == 0)
+                    keepConnection = false;
+                else if (WSAGetLastError() != WSAEWOULDBLOCK)
+                    keepConnection = false;
+            }
+            if (keepConnection && FD_ISSET(client.socket, &writable))
+                keepConnection = sendJoinApproval(client);
+            if (!keepConnection) {
+                const std::uint32_t playerId = client.playerId;
+                const std::uint32_t sessionId = client.sessionId;
+                closesocket(client.socket);
+                server.clients.erase(server.clients.begin() + i);
+                std::cout << "[Server] Client disconnected. Player ID: " << playerId
+                    << " | Session ID: " << sessionId << " | Connected: "
+                    << server.clients.size() << std::endl;
+                continue;
             }
             ++i;
         }
