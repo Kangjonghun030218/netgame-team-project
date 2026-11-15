@@ -33,12 +33,12 @@ OpenGL 의존성은 `team_project/external/`에 포함되어 있습니다. GLEW 
 
 - 소스: `team_project/game_server/server.cpp`
 - 초기화 순서: `WSAStartup(2.2)` → `socket` → `bind` → `listen`
-- 주소: 모든 로컬 IPv4 인터페이스(`INADDR_ANY`), TCP 포트 **9000**
-- 같은 PC의 접속 주소는 `127.0.0.1:9000`, 다른 PC에서는 서버 PC의 LAN IPv4 주소를 사용합니다. 외부 접속에는 방화벽의 해당 포트 허용이 필요합니다.
+- 주소: 모든 로컬 IPv4 인터페이스(`INADDR_ANY`), TCP 포트 **50000**
+- 같은 PC의 접속 주소는 `127.0.0.1:50000`, 다른 PC에서는 서버 PC의 LAN IPv4 주소를 사용합니다. 외부 접속에는 방화벽의 해당 포트 허용이 필요합니다.
 - Enter를 누르면 소켓을 닫고 `WSACleanup`으로 종료합니다. 실패 시 오류 코드를 출력하고 자원을 정리합니다.
 
 임시 연결 확인 코드도 포함되어 있습니다. 서버를 먼저 켜고 게임을 실행하면
-클라이언트 콘솔에 `[Client] Connected to 127.0.0.1:9000`, 서버 콘솔에
+클라이언트 콘솔에 `[Client] Connected to 127.0.0.1:50000`, 서버 콘솔에
 `[Server] Client connected`와 현재 연결 수가 표시됩니다. 연결 종료도 서버에 표시됩니다.
 서버가 없으면 오류를 출력하고 오프라인으로 게임을 실행합니다(접속 대기 최대 2초).
 다른 PC의 서버를 사용하려면 `team_ple.cpp`의 `connection.connectTo`에 있는

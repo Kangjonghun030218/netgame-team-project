@@ -8,7 +8,7 @@
 #include <conio.h>
 
 namespace {
-constexpr unsigned short kServerPort = 9000;
+constexpr unsigned short kServerPort = 50000;
 constexpr std::size_t kMaxClients = 1; 
 
 struct ServerResources {
