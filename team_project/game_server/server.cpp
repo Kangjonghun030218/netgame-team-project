@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <vector>
 #include <conio.h>
@@ -11,13 +12,23 @@ namespace {
 constexpr unsigned short kServerPort = 50000;
 constexpr std::size_t kMaxClients = 1; 
 
+constexpr std::uint32_t kHostPlayerId = 1;
+constexpr std::uint32_t kParticipantPlayerId = 2;
+
+struct ClientSession {
+    SOCKET socket;
+    std::uint32_t playerId;
+    std::uint32_t sessionId;
+};
+
 struct ServerResources {
     bool winsockStarted = false;
     SOCKET listenSocket = INVALID_SOCKET;
-    std::vector<SOCKET> clients;
+    std::vector<ClientSession> clients;
+    std::uint32_t nextSessionId = 1;
 
     ~ServerResources() {
-        for (SOCKET client : clients) closesocket(client);
+        for (const ClientSession& client : clients) closesocket(client.socket);
         if (listenSocket != INVALID_SOCKET) {
             closesocket(listenSocket);
         }
@@ -40,10 +51,19 @@ void acceptClient(ServerResources& server) {
         std::cerr << "[Server] Room full. Only one remote client can join." << std::endl;
         return;
     }
-    server.clients.push_back(client);
+  
+    if (server.nextSessionId == 0) {
+        closesocket(client);
+        std::cerr << "[Server] Session ID limit reached." << std::endl;
+        return;
+    }
+    const ClientSession newClient{client, kParticipantPlayerId, server.nextSessionId++};
+    server.clients.push_back(newClient);
     char ip[INET_ADDRSTRLEN]{};
     inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
     std::cout << "[Server] Client connected: " << ip << ':' << ntohs(peer.sin_port)
+        << " | Player ID: " << newClient.playerId
+        << " | Session ID: " << newClient.sessionId
         << " | Connected: " << server.clients.size() << std::endl;
 }
 }
@@ -94,27 +114,29 @@ int main() {
     }
 
     std::cout << "TCP server listening on 0.0.0.0:" << kServerPort << '\n'
+        << "Host player ID: " << kHostPlayerId << '\n'
         << "Press Enter to stop the server." << std::endl;
     while (true) {
         if (_kbhit() && _getch() == '\r') break;
         fd_set readable;
         FD_ZERO(&readable);
         FD_SET(server.listenSocket, &readable);
-        for (SOCKET client : server.clients) FD_SET(client, &readable);
+        for (const ClientSession& client : server.clients) FD_SET(client.socket, &readable);
         timeval timeout{0, 100000};
         if (select(0, &readable, nullptr, nullptr, &timeout) == SOCKET_ERROR) {
             std::cerr << "select failed: " << WSAGetLastError() << std::endl;
             return 1;
         }
         for (size_t i = 0; i < server.clients.size();) {
-            SOCKET client = server.clients[i];
-            if (FD_ISSET(client, &readable)) {
+            const ClientSession client = server.clients[i];
+            if (FD_ISSET(client.socket, &readable)) {
                 char buffer[256];
-                const int received = recv(client, buffer, sizeof(buffer), 0);
+                const int received = recv(client.socket, buffer, sizeof(buffer), 0);
                 if (received <= 0) {
-                    closesocket(client);
+                    closesocket(client.socket);
                     server.clients.erase(server.clients.begin() + i);
-                    std::cout << "[Server] Client disconnected. Connected: "
+                    std::cout << "[Server] Client disconnected. Player ID: " << client.playerId
+                        << " | Session ID: " << client.sessionId << " | Connected: "
                         << server.clients.size() << std::endl;
                     continue;
                 }
