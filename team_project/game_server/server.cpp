@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -21,6 +22,7 @@ constexpr std::uint16_t kJoinRequestType = 1;
 constexpr std::uint16_t kJoinAcceptType = 2;
 constexpr std::size_t kHeaderBytes = 12;
 constexpr std::size_t kJoinApprovalBytes = 20;
+constexpr std::chrono::seconds kJoinRequestTimeout{5};
 
 struct ClientSession {
     SOCKET socket;
@@ -30,6 +32,7 @@ struct ClientSession {
     std::size_t headerBytesReceived = 0;
     bool joinValidated = false;
     std::size_t approvalBytesSent = 0;
+    std::chrono::steady_clock::time_point connectedAt = std::chrono::steady_clock::now();
 };
 
 struct ServerResources {
@@ -230,7 +233,13 @@ int main() {
         for (size_t i = 0; i < server.clients.size();) {
             ClientSession& client = server.clients[i];
             bool keepConnection = true;
-            if (FD_ISSET(client.socket, &readable)) {
+            if (!client.joinValidated &&
+                std::chrono::steady_clock::now() - client.connectedAt >= kJoinRequestTimeout) {
+                std::cerr << "[Server] Join request timed out. Player ID: " << client.playerId
+                    << " | Session ID: " << client.sessionId << std::endl;
+                keepConnection = false;
+            }
+            if (keepConnection && FD_ISSET(client.socket, &readable)) {
                 char buffer[256];
                 const int received = recv(client.socket, buffer, sizeof(buffer), 0);
                 if (received > 0)
